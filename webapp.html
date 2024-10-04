@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Complete 3D Orrery with All Planets and Cosmic Dust</title>
+    <title>Complete 3D Orrery with Clickable Objects</title>
     <style>
         body { margin: 0; overflow: hidden; }
         canvas { display: block; }
@@ -33,6 +33,28 @@
         #toggleLabelsButton { top: 120px; }
         #toggleNEOButton { top: 160px; }
         #toggleDustButton { top: 200px; }
+        .popup {
+            display: none;
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            z-index: 1000;
+            max-width: 400px;
+        }
+        .popup h2 {
+            margin-top: 0;
+        }
+        .popup-close {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -40,8 +62,14 @@
     <label for="speedSlider" style="position: absolute; top: 50px; left: 20px; color: white;">Revolution Speed</label>
     <button id="toggleOrbitsButton" class="toggle-button">Hide Orbits</button>
     <button id="toggleLabelsButton" class="toggle-button">Hide Labels</button>
-    <button id="toggleNEOButton" class="toggle-button">Hide NEO</button>
+    <button id="toggleNEOButton" class="toggle-button">Show NEO</button>
     <button id="toggleDustButton" class="toggle-button">Hide Dust</button>
+
+    <div id="popup" class="popup">
+        <span class="popup-close">&times;</span>
+        <h2 id="popup-title"></h2>
+        <p id="popup-description"></p>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/three@latest/build/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@latest/examples/js/controls/OrbitControls.js"></script>
@@ -104,8 +132,8 @@
             }
         );
 
-        function createPlanet(size, color, semiMajorAxis, eccentricity, inclination, longAscNode, argPerigee, meanAnomaly, period, name, isNEO=false) {
-            const planetTexture = textureLoader.load('2k_earth_daymap.jpg');
+        function createPlanet(size, color, semiMajorAxis, eccentricity, inclination, longAscNode, argPerigee, meanAnomaly, period, name, isNEO=false,texture) {
+            const planetTexture = textureLoader.load(texture);
             const material = new THREE.MeshBasicMaterial({ map: planetTexture });
 
             const geometry = new THREE.SphereGeometry(size, 32, 32);
@@ -162,7 +190,7 @@
                 element["argument of perihelion (deg)"], 
                 element["mean anomaly (deg)"], 
                 element["orbital period (years)"], 
-                element["name"],element["isNEO"] === 'TRUE'
+                element["name"],element["isNEO"] === 'TRUE',element["texture"]
             );
         });
     } catch (error) {
@@ -289,6 +317,52 @@
                 dustCloud.visible = dustVisible;
                 toggleDustButton.textContent = dustVisible ? 'Hide Dust' : 'Show Dust';
             });
+            const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
+
+        function onMouseClick(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+
+            const intersects = raycaster.intersectObjects([sun, planets[2].mesh, planets[2].orbit]);
+
+            if (intersects.length > 0) {
+                const object = intersects[0].object;
+                let title, description;
+
+                if (object === sun) {
+                    title = "Sun";
+                    description = "The Sun is the star at the center of the Solar System. It is a nearly perfect sphere of hot plasma, heated to incandescence by nuclear fusion reactions in its core. The Sun radiates this energy mainly as light, ultraviolet, and infrared radiation, and is the most important source of energy for life on Earth.";
+                } else if (object === planets[2].mesh) {
+                    title = "Earth";
+                    description = "Earth is the third planet from the Sun and the only astronomical object known to harbor life. About 29.2% of Earth's surface is land consisting of continents and islands. The remaining 70.8% is covered with water, mostly by oceans, seas, gulfs, and other salt-water bodies, but also by lakes, rivers, and other fresh water, which together constitute the hydrosphere.";
+                } else if (object === planets[2].orbit) {
+                    title = "Earth's Orbit";
+                    description = "Earth's orbit is the path through which Earth travels around the Sun. Earth's orbital period is about 365.25 days. The orbit is not perfectly circular, but slightly elliptical with the average distance from the Sun being about 93 million miles (150 million kilometers).";
+                }
+
+                showPopup(title, description);
+            }
+        }
+
+        function showPopup(title, description) {
+            const popup = document.getElementById('popup');
+            const popupTitle = document.getElementById('popup-title');
+            const popupDescription = document.getElementById('popup-description');
+
+            popupTitle.textContent = title;
+            popupDescription.textContent = description;
+            popup.style.display = 'block';
+        }
+
+        document.addEventListener('click', onMouseClick, false);
+
+        const closePopup = document.querySelector('.popup-close');
+        closePopup.addEventListener('click', () => {
+            document.getElementById('popup').style.display = 'none';
+        });
     
             function animate() {
                 requestAnimationFrame(animate);
@@ -296,7 +370,7 @@
                 const time = Date.now() * 0.001 * revolutionSpeed;
                 sun.rotation.y += 0.001;
                 sunGlow.rotation.y += 0.001;
-                dustCloud.rotation.y += 0.0001;
+                dustCloud.rotation.y += 0.0001 * revolutionSpeed;
                 planets.forEach(planet => {
                     if (!planet.isNEO || (planet.isNEO && showNEOs)) {
                         const M = (planet.meanAnomaly + (360 * time / (planet.period * 365.25))) * Math.PI / 180;
@@ -327,6 +401,28 @@
                 });
     
                 controls.update();
+                if (planets[2] && planets[2].orbit) {
+                planets[2].orbit.raycast = function(raycaster, intersects) {
+                    const points = this.geometry.attributes.position.array;
+                    const threshold = 0.1; // Adjust this value to change the "thickness" of the orbit line
+
+                    for (let i = 0; i < points.length; i += 3) {
+                        const point = new THREE.Vector3(points[i], points[i + 1], points[i + 2]);
+                        const distance = raycaster.ray.distanceToPoint(point);
+
+                        if (distance < threshold) {
+                            intersects.push({
+                                distance: distance,
+                                point: point,
+                                object: this
+                            });
+                            break;
+                        }
+                    }
+                };
+            }
+
+          
                 renderer.render(scene, camera);
             }
     
